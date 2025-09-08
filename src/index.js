@@ -95,6 +95,7 @@ import {
   ERROR_IS_DRAWING,
   ERROR_POINTS_NOT_DRAWN,
   FLOAT_BYTES,
+  KEY_ACTION_INTERSECT,
   KEY_ACTION_LASSO,
   KEY_ACTION_MERGE,
   KEY_ACTION_REMOVE,
@@ -818,14 +819,31 @@ const createScatterplot = (
    */
   const select = (
     pointIdxs,
-    { merge = false, remove = false, preventEvent = false } = {},
+    {
+      intersect = false,
+      merge = false,
+      remove = false,
+      preventEvent = false,
+    } = {},
   ) => {
     const newSelectedPoints = Array.isArray(pointIdxs)
       ? pointIdxs
       : [pointIdxs];
     const currSelectedPoints = [...selectedPoints];
 
-    if (merge) {
+    if (intersect) {
+      const newSelectedPointsSet = new Set(newSelectedPoints);
+
+      selectedPoints =
+        selectedPoints.length > 0
+          ? selectedPoints.filter((point) => newSelectedPointsSet.has(point))
+          : newSelectedPoints;
+
+      if (currSelectedPoints.length === selectedPoints.length) {
+        draw = true;
+        return;
+      }
+    } else if (merge) {
       selectedPoints = unionIntegers(selectedPoints, newSelectedPoints);
       if (currSelectedPoints.length === selectedPoints.length) {
         draw = true;
@@ -1013,12 +1031,12 @@ const createScatterplot = (
   const lassoEnd = (
     lassoPoints,
     lassoPointsFlat,
-    { merge = false, remove = false } = {},
+    { intersect = false, merge = false, remove = false } = {},
   ) => {
     camera.config({ isFixed: cameraIsFixed });
     lassoPointsCurr = [...lassoPoints];
     const pointsInLasso = findPointsInLasso(lassoPointsFlat);
-    select(pointsInLasso, { merge, remove });
+    select(pointsInLasso, { intersect, merge, remove });
 
     pubSub.publish('lassoEnd', {
       coordinates: lassoPointsCurr,
@@ -1112,6 +1130,7 @@ const createScatterplot = (
       event.preventDefault();
       lassoActive = false;
       lassoManager.end({
+        intersect: checkModKey(event, KEY_ACTION_INTERSECT),
         merge: checkModKey(event, KEY_ACTION_MERGE),
         remove: checkModKey(event, KEY_ACTION_REMOVE),
       });
