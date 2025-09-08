@@ -20,6 +20,9 @@
     "src/*",
     "dist/*"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "npm run build-library; npm run build-demo",
     "build-library": "rm -rf dist/*; rollup -c; cp src/types.d.ts dist/; sed -i 's/\\.\\/renderer/\\.\\/regl-scatterplot.esm/g' dist/types.d.ts; tsc dist/*.esm.js --allowJs --declaration --emitDeclarationOnly",
