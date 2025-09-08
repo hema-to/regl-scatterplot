@@ -139,6 +139,7 @@ interface BaseOptions {
   backgroundColor: Color;
   deselectOnDblClick: boolean;
   deselectOnEscape: boolean;
+  actionKeyMap: KeyMap;
   keyMap: KeyMap;
   mouseMode: MouseMode;
   showPointConnections: boolean;
