@@ -65,6 +65,7 @@ type LassoOptions = {
   lineWidth: number;
   minDelay: number;
   minDist: number;
+  mode: 'intersect' | 'merge' | 'remove' | null;
   clearEvent: 'lassoEnd' | 'deselect';
   initiator: boolean;
   initiatorParentElement: HTMLElement;

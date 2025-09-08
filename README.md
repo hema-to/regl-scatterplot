@@ -793,6 +793,7 @@ can be read and written via [`scatterplot.get()`](#scatterplot.get) and [`scatte
 | pointConnectionMaxIntPointsPerSegment | int                                          | `100`                               |                                                                 | `true`   | `false`     |
 | pointConnectionTolerance              | float                                        | `0.002`                             |                                                                 | `true`   | `false`     |
 | pointScaleMode                        | string                                       | `'asinh'`                           | `'asinh'`, `'linear'`, or `'constant'`                          | `true`   | `false`     |
+| lassoMode                             | string                                       | `null`                              | `null`, `'intersect'`, `'merge'`, or `'remove'`                      | `true`   | `true`     |
 | lassoType                             | string                                       | `'freeform'`                        | `'freeform'`, `'rectangle'`, or `'brush'`                       | `true`   | `false`     |
 | lassoColor                            | quadruple                                    | rgba(0, 0.667, 1, 1)                | hex, rgb, rgba                                                  | `true`   | `false`     |
 | lassoLineWidth                        | float                                        | 2                                   | >= 1                                                            | `true`   | `false`     |
@@ -918,11 +919,13 @@ via JavaScript. E.g.: `scatterplot.get('lassoInitiatorElement').style.background
 The `actionKeyMap` property is an object defining which actions are enabled when
 holding down which modifier key. E.g.: `{ lasso: 'shift' }`. Acceptable actions
 are `lasso`, `rotate`, `merge` (for selecting multiple items by merging a series
-of lasso or click selections), and `remove` (for removing selected points).
+of lasso or click selections), `intersect` (for selecting items that are a subset of selected points) and `remove` (for removing selected points).
 Acceptable modifier keys are `alt`, `cmd`, `ctrl`, `meta`, `shift`. 
 
 You can also use the `actionKeyMap` option to disable the lasso selection and
 rotation by setting `actionKeyMap` to an empty object.
+
+The selection mode can be set via the property `lassoMode`, in which case the corresponding keyboard shortcuts will be ignored.
 
 <a name="property-examples" href="#property-examples">#</a> <b>Examples:</b>
 

@@ -65,6 +65,7 @@ import {
   DEFAULT_LASSO_LONG_PRESS_TIME,
   DEFAULT_LASSO_MIN_DELAY,
   DEFAULT_LASSO_MIN_DIST,
+  DEFAULT_LASSO_MODE,
   DEFAULT_LASSO_ON_LONG_PRESS,
   DEFAULT_LASSO_TYPE,
   DEFAULT_MOUSE_MODE,
@@ -277,6 +278,7 @@ const createScatterplot = (
     lassoLineWidth = DEFAULT_LASSO_LINE_WIDTH,
     lassoMinDelay = DEFAULT_LASSO_MIN_DELAY,
     lassoMinDist = DEFAULT_LASSO_MIN_DIST,
+    lassoMode = DEFAULT_LASSO_MODE,
     lassoClearEvent = DEFAULT_LASSO_CLEAR_EVENT,
     lassoInitiator = DEFAULT_LASSO_INITIATOR,
     lassoInitiatorParentElement = document.body,
@@ -1062,10 +1064,19 @@ const createScatterplot = (
     if (lassoActive) {
       event.preventDefault();
       lassoActive = false;
+
+      const hasLassoModeCfg = !!lassoMode;
+
       lassoManager.end({
-        intersect: checkModKey(event, KEY_ACTION_INTERSECT),
-        merge: checkModKey(event, KEY_ACTION_MERGE),
-        remove: checkModKey(event, KEY_ACTION_REMOVE),
+        intersect: hasLassoModeCfg
+          ? lassoMode === 'intersect'
+          : checkModKey(event, KEY_ACTION_INTERSECT),
+        merge: hasLassoModeCfg
+          ? lassoMode === 'merge'
+          : checkModKey(event, KEY_ACTION_MERGE),
+        remove: hasLassoModeCfg
+          ? lassoMode === 'remove'
+          : checkModKey(event, KEY_ACTION_REMOVE),
       });
     }
 
@@ -3163,6 +3174,10 @@ const createScatterplot = (
     lassoType = lassoManager.get('type');
   };
 
+  const setLassoMode = (newMode) => {
+    lassoMode = newMode;
+  };
+
   const setLassoBrushSize = (newBrushSize) => {
     lassoBrushSize = Number(newBrushSize) || lassoBrushSize;
     lassoManager.set({ brushSize: lassoBrushSize });
@@ -3999,6 +4014,10 @@ const createScatterplot = (
 
     if (properties.lassoType !== undefined) {
       setLassoType(properties.lassoType);
+    }
+
+    if (properties.lassoMode !== undefined) {
+      setLassoMode(properties.lassoMode);
     }
 
     if (properties.lassoBrushSize !== undefined) {
