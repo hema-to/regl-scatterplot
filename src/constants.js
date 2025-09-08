@@ -71,6 +71,7 @@ export const DEFAULT_LASSO_LONG_PRESS_AFTER_EFFECT_TIME = 500;
 export const DEFAULT_LASSO_LONG_PRESS_EFFECT_DELAY = 100;
 export const DEFAULT_LASSO_LONG_PRESS_REVERT_EFFECT_TIME = 250;
 export const DEFAULT_LASSO_BRUSH_SIZE = 24;
+export const DEFAULT_LASSO_MODE = null;
 
 // Key mapping
 export const KEY_ACTION_INTERSECT = 'intersect';
