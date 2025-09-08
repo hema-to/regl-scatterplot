@@ -73,6 +73,7 @@ export const DEFAULT_LASSO_LONG_PRESS_REVERT_EFFECT_TIME = 250;
 export const DEFAULT_LASSO_BRUSH_SIZE = 24;
 
 // Key mapping
+export const KEY_ACTION_INTERSECT = 'intersect';
 export const KEY_ACTION_LASSO = 'lasso';
 export const KEY_ACTION_ROTATE = 'rotate';
 export const KEY_ACTION_MERGE = 'merge';
@@ -80,6 +81,7 @@ export const KEY_ACTION_REMOVE = 'remove';
 export const KEY_ACTIONS = [
   KEY_ACTION_LASSO,
   KEY_ACTION_ROTATE,
+  KEY_ACTION_INTERSECT,
   KEY_ACTION_MERGE,
   KEY_ACTION_REMOVE,
 ];

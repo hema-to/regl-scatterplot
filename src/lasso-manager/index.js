@@ -606,7 +606,7 @@ export const createLasso = (
     hideInitiator();
   };
 
-  const end = ({ merge = false, remove = false } = {}) => {
+  const end = ({ intersect = false, merge = false, remove = false } = {}) => {
     isLasso = false;
 
     const currLassoPos = [...lassoPos];
@@ -618,7 +618,7 @@ export const createLasso = (
 
     // When `currLassoPos` is empty the user didn't actually lasso
     if (currLassoPos.length > 0) {
-      onEnd(currLassoPos, currLassoPosFlat, { merge, remove });
+      onEnd(currLassoPos, currLassoPosFlat, { intersect, merge, remove });
     }
 
     return currLassoPos;
