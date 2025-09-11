@@ -10,7 +10,7 @@ type Value = 'value' | 'value2' | 'valueB' | 'valueW' | 'w';
 type DataEncoding = Category | Value;
 type PointDataEncoding = DataEncoding | 'inherit' | 'segment';
 
-type KeyAction = 'lasso' | 'rotate' | 'merge' | 'intersect';
+type KeyAction = 'lasso' | 'rotate' | 'merge' | 'intersect' | 'remove';
 type KeyMap = Record<'alt' | 'cmd' | 'ctrl' | 'meta' | 'shift', KeyAction>;
 
 type MouseMode = 'panZoom' | 'lasso' | 'rotate';
