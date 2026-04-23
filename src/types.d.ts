@@ -295,7 +295,7 @@ export type Events = import('pub-sub-es').Event<
     { coordinates: number[] }
   > &
   import('pub-sub-es').Event<'pointOver' | 'pointOut', number> &
-  import('pub-sub-es').Event<'select' | 'focus', { points: number[] }> &
+  import('pub-sub-es').Event<'select' | 'focus', { points: number[]; lassoMode: LassoOptions["mode"]; }> &
   import('pub-sub-es').Event<'points', { points: number[][] }> &
   import('pub-sub-es').Event<'transitionEnd', import('regl').Regl> &
   import('pub-sub-es').Event<

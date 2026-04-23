@@ -885,7 +885,7 @@ const createScatterplot = (
     setPointConnectionColorState(selectedPoints, 1);
 
     if (!preventEvent) {
-      pubSub.publish('select', { points: selectedPoints });
+      pubSub.publish('select', { points: selectedPoints, lassoMode });
     }
 
     draw = true;
