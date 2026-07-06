@@ -159,7 +159,7 @@ interface BaseOptions {
   colorBy: null | DataEncoding;
   sizeBy: null | DataEncoding;
   opacityBy: null | DataEncoding;
-  pointOrder: null | number[];
+  pointOrder: null | number[] | Int32Array | Uint32Array;
   xScale: null | Scale;
   yScale: null | Scale;
   pointScaleMode: PointScaleMode;
