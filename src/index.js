@@ -124,7 +124,7 @@ import {
   W_NAMES,
   Z_NAMES,
 } from './constants.js';
-import createKdbush from './kdbush.js';
+import createKdbush, { kdbushFrom } from './kdbush.js';
 import createLassoManager from './lasso-manager/index.js';
 import POINT_FS from './point.fs';
 import createVertexShader from './point.vs';
@@ -4757,6 +4757,9 @@ const createScatterplot = (
   init();
 
   return {
+    attachSpatialIndex: (buffer) => {
+      spatialIndex = kdbushFrom(buffer);
+    },
     /**
      * Get whether the browser supports all necessary WebGL features
      * @return {boolean} If `true` the browser supports all necessary WebGL features

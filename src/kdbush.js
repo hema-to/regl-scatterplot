@@ -63,4 +63,6 @@ const createKdbush = (
     }
   });
 
+export const kdbushFrom = (buffer) => KDBush.from(buffer);
+
 export default createKdbush;
