@@ -1637,7 +1637,7 @@ const createScatterplot = (
   const setPointOrder = (newPointOrder) => {
     if (newPointOrder === null || newPointOrder === undefined) {
       pointOrder = null;
-    } else if (Array.isArray(newPointOrder)) {
+    } else if (Array.isArray(newPointOrder) || ArrayBuffer.isView(newPointOrder)) {
       pointOrder = newPointOrder;
     } else {
       return;
