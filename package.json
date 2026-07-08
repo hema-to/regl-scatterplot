@@ -89,12 +89,12 @@
     "npm": ">=7.0.0",
     "node": ">=20.0.0"
   },
-  "homepage": "https://github.com/flekschas/regl-scatterplot",
+  "homepage": "https://github.com/hema-to/regl-scatterplot",
   "repository": {
     "type": "git",
-    "url": "git://github.com/flekschas/regl-scatterplot.git"
+    "url": "git+https://github.com/hema-to/regl-scatterplot.git"
   },
   "bugs": {
-    "url": "https://github.com/flekschas/regl-scatterplot/issues"
+    "url": "https://github.com/hema-to/regl-scatterplot/issues"
   }
 }
