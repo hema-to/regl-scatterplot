@@ -40,6 +40,7 @@ import {
   DEFAULT_DESELECT_ON_ESCAPE,
   DEFAULT_DISTANCE,
   DEFAULT_EASING,
+  DEFAULT_EXTERNAL_LASSO_SELECTION,
   DEFAULT_HEIGHT,
   DEFAULT_IMAGE_LOAD_TIMEOUT,
   DEFAULT_LASSO_BRUSH_SIZE,
@@ -282,6 +283,7 @@ const createScatterplot = (
     lassoInitiatorParentElement = document.body,
     lassoLongPressIndicatorParentElement = document.body,
     lassoOnLongPress = DEFAULT_LASSO_ON_LONG_PRESS,
+    externalLassoSelection = DEFAULT_EXTERNAL_LASSO_SELECTION,
     lassoLongPressTime = DEFAULT_LASSO_LONG_PRESS_TIME,
     lassoLongPressAfterEffectTime = DEFAULT_LASSO_LONG_PRESS_AFTER_EFFECT_TIME,
     lassoLongPressEffectDelay = DEFAULT_LASSO_LONG_PRESS_EFFECT_DELAY,
@@ -1067,8 +1069,13 @@ const createScatterplot = (
   ) => {
     camera.config({ isFixed: cameraIsFixed });
     lassoPointsCurr = [...lassoPoints];
-    const pointsInLasso = findPointsInLasso(lassoPointsFlat);
-    select(pointsInLasso, { intersect, merge, remove });
+    // When the host app owns lasso selection (externalLassoSelection), SKIP the native
+    // findPointsInLasso winding + select — the app resolves the selection from the published
+    // lassoEnd coordinates.
+    if (!externalLassoSelection) {
+      const pointsInLasso = findPointsInLasso(lassoPointsFlat);
+      select(pointsInLasso, { intersect, merge, remove });
+    }
 
     pubSub.publish('lassoEnd', {
       coordinates: lassoPointsCurr,
@@ -3348,6 +3355,10 @@ const createScatterplot = (
     lassoOnLongPress = Boolean(newLassoOnLongPress);
   };
 
+  const setExternalLassoSelection = (newExternalLassoSelection) => {
+    externalLassoSelection = Boolean(newExternalLassoSelection);
+  };
+
   const setLassoLongPressTime = (newLassoOnLongPressTime) => {
     lassoLongPressTime = Number(newLassoOnLongPressTime);
   };
@@ -3758,6 +3769,10 @@ const createScatterplot = (
 
     if (property === 'lassoOnLongPress') {
       return lassoOnLongPress;
+    }
+
+    if (property === 'externalLassoSelection') {
+      return externalLassoSelection;
     }
 
     if (property === 'lassoType') {
@@ -4204,6 +4219,10 @@ const createScatterplot = (
 
     if (properties.lassoOnLongPress !== undefined) {
       setLassoOnLongPress(properties.lassoOnLongPress);
+    }
+
+    if (properties.externalLassoSelection !== undefined) {
+      setExternalLassoSelection(properties.externalLassoSelection);
     }
 
     if (properties.lassoLongPressTime !== undefined) {

@@ -398,6 +398,85 @@ test(
   }
 );
 
+test(
+  'externalLassoSelection: lassoEnd fires but native select is skipped',
+  async () => {
+    const dim = 200;
+    const hdim = dim / 2;
+    const canvas = createCanvas(dim, dim);
+    const scatterplot = createScatterplot({
+      canvas,
+      width: dim,
+      height: dim,
+      // The host app owns selection: regl should NOT run its native findPointsInLasso + select.
+      externalLassoSelection: true,
+    });
+
+    // The SAME points + lasso as the test above, which selects [0, 2, 4]. Here `select` must NOT fire.
+    const points = [
+      [0, 0],
+      [1, 1],
+      [1, -1],
+      [-1, -1],
+      [-1, 1],
+    ];
+    await scatterplot.draw(points);
+
+    let selectCount = 0;
+    scatterplot.subscribe('select', () => ++selectCount);
+
+    let lassoStartCount = 0;
+    let lassoExtendCount = 0;
+    let lassoEndCount = 0;
+    let lassoEndCoordinates = [];
+    scatterplot.subscribe('lassoStart', () => ++lassoStartCount);
+    scatterplot.subscribe('lassoExtend', () => ++lassoExtendCount);
+    scatterplot.subscribe('lassoEnd', ({ coordinates }) => {
+      ++lassoEndCount;
+      lassoEndCoordinates = coordinates;
+    });
+
+    const [_, lassoKey] = Object.entries(scatterplot.get('keyMap')).find(
+      ([action]) => action === KEY_ACTION_LASSO
+    );
+
+    canvas.dispatchEvent(
+      createMouseEvent('mousedown', dim * 1.125, hdim, {
+        [`${lassoKey}Key`]: true,
+        buttons: 1,
+      })
+    );
+    await wait(0);
+
+    const mousePositions = [
+      [dim * 1.125, hdim],
+      [hdim, -dim * 0.125],
+      [-dim * 0.125, -dim * 0.125],
+      [-dim * 0.125, dim * 0.125],
+      [0, dim * 0.9],
+      [dim * 0.1, dim * 0.9],
+      [dim * 0.1, dim * 1.125],
+      [dim * 1.125, dim * 1.125],
+    ];
+    await asyncForEach(mousePositions, async (mousePosition) => {
+      window.dispatchEvent(createMouseEvent('mousemove', ...mousePosition));
+      await wait(DEFAULT_LASSO_MIN_DELAY + 5);
+    });
+    window.dispatchEvent(createMouseEvent('mouseup'));
+    await wait(0);
+
+    // The lasso still tracks + publishes its polygon (the app resolves the selection from it)…
+    expect(lassoStartCount).toBe(1);
+    expect(lassoExtendCount).toBe(mousePositions.length);
+    expect(lassoEndCount).toBe(1);
+    expect(lassoEndCoordinates.length).toBe(mousePositions.length);
+    // …but regl's native selection is skipped entirely.
+    expect(selectCount).toBe(0);
+
+    scatterplot.destroy();
+  }
+);
+
 test('disable lasso selection', async () => {
   const dim = 200;
   const hdim = dim / 2;

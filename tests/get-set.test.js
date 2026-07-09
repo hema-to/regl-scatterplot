@@ -96,6 +96,22 @@ test('set({ aspectRatio })', (t) => {
   scatterplot.destroy();
 });
 
+test('set({ externalLassoSelection })', () => {
+  const canvas = createCanvas(400, 200);
+  const scatterplot = createScatterplot({ canvas, width: 400, height: 200 });
+
+  // Defaults off (native lasso selection).
+  expect(scatterplot.get('externalLassoSelection')).toBe(false);
+
+  scatterplot.set({ externalLassoSelection: true });
+  expect(scatterplot.get('externalLassoSelection')).toBe(true);
+
+  scatterplot.set({ externalLassoSelection: false });
+  expect(scatterplot.get('externalLassoSelection')).toBe(false);
+
+  scatterplot.destroy();
+});
+
 test('set({ backgroundColor })', () => {
   const scatterplot = createScatterplot({ canvas: createCanvas() });
 
