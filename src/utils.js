@@ -557,6 +557,51 @@ export const toArrayOrientedPoints = (points) =>
     }
   });
 
+/**
+ * Resolve columnar point input to typed-array accessors WITHOUT materializing an
+ * array-of-arrays. Returns `null` unless the input is the columnar fast-path shape
+ * (an object with `x`/`y` arrays and no `line`/`lineOrder` connection component); the
+ * caller then falls back to {@link toArrayOrientedPoints}. `getZ`/`getW` are resolved
+ * from the exact same `Z_NAMES`/`W_NAMES` component lookup as `toArrayOrientedPoints`,
+ * so the two paths read byte-identical values.
+ * @param {import('./types').Points} points - The point data
+ * @return {{ length: number, x: any, y: any, getX: (i: number) => number, getY: (i: number) => number, getZ: ((i: number) => number) | undefined, getW: ((i: number) => number) | undefined } | null}
+ */
+export const toColumnarPoints = (points) => {
+  if (!points || Array.isArray(points)) {
+    return null;
+  }
+
+  const isArr = (a) => Array.isArray(a) || ArrayBuffer.isView(a);
+
+  if (!isArr(points.x) || !isArr(points.y)) {
+    return null;
+  }
+
+  // Point-connection shapes go through the untouched array-oriented path.
+  if (isArr(points.line) || isArr(points.lineOrder)) {
+    return null;
+  }
+
+  const components = Object.keys(points);
+  const zName = components.find((c) => Z_NAMES.has(c));
+  const getZ =
+    zName && isArr(points[zName]) ? (i) => points[zName][i] : undefined;
+  const wName = components.find((c) => W_NAMES.has(c));
+  const getW =
+    wName && isArr(points[wName]) ? (i) => points[wName][i] : undefined;
+
+  return {
+    length: points.x.length,
+    x: points.x,
+    y: points.y,
+    getX: (i) => points.x[i],
+    getY: (i) => points.y[i],
+    getZ,
+    getW,
+  };
+};
+
 export const isHorizontalLine = (annotation) =>
   Number.isFinite(annotation.y) && !('x' in annotation);
 

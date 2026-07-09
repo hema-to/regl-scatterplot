@@ -36,14 +36,32 @@ const createKdbush = (
   new Promise((resolve, reject) => {
     if (pointsOrIndex instanceof ArrayBuffer) {
       resolve(KDBush.from(pointsOrIndex));
-    } else if (
+      return;
+    }
+
+    // Columnar descriptor (from `toColumnarPoints`): build the index straight from the x/y typed
+    // arrays. The coordinates are the same numbers the array-oriented path reads (`p[i][0]`/`[1]`),
+    // so the resulting KDBush is byte-identical.
+    const isColumnar =
+      !Array.isArray(pointsOrIndex) &&
+      (Array.isArray(pointsOrIndex.x) || ArrayBuffer.isView(pointsOrIndex.x));
+
+    if (
       (pointsOrIndex.length < WORKER_THRESHOLD ||
         options.useWorker === false) &&
       options.useWorker !== true
     ) {
       const index = new KDBush(pointsOrIndex.length, options.nodeSize);
-      for (const pointOrIndex of pointsOrIndex) {
-        index.add(pointOrIndex[0], pointOrIndex[1]);
+      if (isColumnar) {
+        const { x, y } = pointsOrIndex;
+        const n = pointsOrIndex.length;
+        for (let i = 0; i < n; i++) {
+          index.add(x[i], y[i]);
+        }
+      } else {
+        for (const pointOrIndex of pointsOrIndex) {
+          index.add(pointOrIndex[0], pointOrIndex[1]);
+        }
       }
       index.finish();
       resolve(index);
@@ -59,7 +77,18 @@ const createKdbush = (
         worker.terminate();
       };
 
-      worker.postMessage({ points: pointsOrIndex, nodeSize: options.nodeSize });
+      if (isColumnar) {
+        worker.postMessage({
+          columnar: { x: pointsOrIndex.x, y: pointsOrIndex.y },
+          length: pointsOrIndex.length,
+          nodeSize: options.nodeSize,
+        });
+      } else {
+        worker.postMessage({
+          points: pointsOrIndex,
+          nodeSize: options.nodeSize,
+        });
+      }
     }
   });
 

@@ -120,10 +120,10 @@ import {
   MOUSE_MODES,
   SINGLE_CLICK_DELAY,
   SKIP_DEPRECATION_VALUE_TRANSLATION,
-  VALUE_ZW_DATA_TYPES,
   W_NAMES,
   Z_NAMES,
 } from './constants.js';
+import { createStateTextureData } from './create-state-texture-data.js';
 import createKdbush, { kdbushFrom } from './kdbush.js';
 import createLassoManager from './lasso-manager/index.js';
 import POINT_FS from './point.fs';
@@ -161,6 +161,7 @@ import {
   min,
   rgbBrightness,
   toArrayOrientedPoints,
+  toColumnarPoints,
   toRgba,
   verticesToPolygon,
 } from './utils.js';
@@ -379,6 +380,14 @@ const createScatterplot = (
   /** @type{Set<number>} */
   const filteredPointsSet = new Set();
   let points = [];
+  // Columnar fast-path descriptor (typed-array accessors) when the drawn input is columnar and has
+  // no point-connection data; `null` on the array-oriented fallback path. Non-null ⟹ `points` holds
+  // this same descriptor (not an array-of-arrays), so hit-test reads go through the accessors below.
+  let pointsColumnar = null;
+  // Per-draw compute breakdown (ms), exposed via `get('drawTiming')` so the app can profile the
+  // full main-thread draw cost — the array-of-arrays build, state-texture pack + GPU upload, point
+  // index buffer, and spatial-index attach — which the coarse draw timer alone cannot separate.
+  let lastDrawTiming = {};
   let numPoints = 0;
   let numPointsInView = 0;
   let lassoActive = false;
@@ -617,6 +626,18 @@ const createScatterplot = (
     );
   };
 
+  // Coordinate accessors that read either the columnar descriptor (fast path) or the
+  // array-oriented `points[i]` tuple (fallback). Every hit-test/geometry read site goes through
+  // these so the fast path never materializes an array-of-arrays.
+  const pointX = (i) =>
+    pointsColumnar ? pointsColumnar.getX(i) : points[i][0];
+  const pointY = (i) =>
+    pointsColumnar ? pointsColumnar.getY(i) : points[i][1];
+  const pointXY = (i) => [pointX(i), pointY(i)];
+  // The columnar fast path is gated on the absence of line data, so it never has connections.
+  const pointHasConnections = () =>
+    pointsColumnar ? false : hasPointConnections(points[0]);
+
   const getPoints = () => {
     if (isPointsFiltered) {
       return points.filter((_, i) => filteredPointsSet.has(i));
@@ -650,7 +671,8 @@ const createScatterplot = (
     let minDist = pointSizeNdc;
     let clostestPointIdx = -1;
     for (const pointIdx of pointsInBBox) {
-      const [ptX, ptY] = points[pointIdx];
+      const ptX = pointX(pointIdx);
+      const ptY = pointY(pointIdx);
       const d = dist(ptX, ptY, xNdc, yNdc);
       if (d < minDist) {
         minDist = d;
@@ -680,7 +702,7 @@ const createScatterplot = (
     // next we test each point in the bounding box if it is in the polygon too
     const pointsInPolygon = [];
     for (const pointIdx of pointsInBBox) {
-      if (isPointInPolygon(lassoPolygon, points[pointIdx])) {
+      if (isPointInPolygon(lassoPolygon, pointXY(pointIdx))) {
         pointsInPolygon.push(pointIdx);
       }
     }
@@ -701,7 +723,7 @@ const createScatterplot = (
     if (
       computingPointConnectionCurves ||
       !showPointConnections ||
-      !hasPointConnections(points[pointIdxs[0]])
+      !pointHasConnections()
     ) {
       return;
     }
@@ -877,29 +899,37 @@ const createScatterplot = (
       return;
     }
 
-    const selectedPointsBuffer = [];
-
+    // Drop invalid/filtered points without splice-in-loop, then fill a preallocated Float32Array with
+    // the state-tex coords inlined. The old path pushed into a plain Array via `push.apply` (one 2-elem
+    // allocation per point) and handed that Array to regl, which re-converts it element-by-element — both
+    // super-linear + GC-heavy at 100k+ selected points (a large lasso synced across many live plots froze
+    // the tab; ~86x faster at 500k). A typed array uploads directly with no per-element conversion.
     selectedPointsSet.clear();
     selectedPointsConnectionSet.clear();
 
-    for (let i = selectedPoints.length - 1; i >= 0; i--) {
+    const validSelectedPoints = [];
+    for (let i = 0; i < selectedPoints.length; i++) {
       const pointIdx = selectedPoints[i];
-
       if (
         pointIdx < 0 ||
         pointIdx >= numPoints ||
         isPointsFilteredOut(pointIdx)
       ) {
-        // Remove invalid selected points
-        selectedPoints.splice(i, 1);
         continue;
       }
-
+      validSelectedPoints.push(pointIdx);
       selectedPointsSet.add(pointIdx);
-      selectedPointsBuffer.push.apply(
-        selectedPointsBuffer,
-        indexToStateTexCoord(pointIdx),
-      );
+    }
+    selectedPoints = validSelectedPoints;
+
+    const numSelected = selectedPoints.length;
+    const selectedPointsBuffer = new Float32Array(numSelected * 2);
+    for (let i = 0; i < numSelected; i++) {
+      const pointIdx = selectedPoints[i];
+      selectedPointsBuffer[i * 2] =
+        (pointIdx % stateTexRes) / stateTexRes + stateTexEps;
+      selectedPointsBuffer[i * 2 + 1] =
+        Math.floor(pointIdx / stateTexRes) / stateTexRes + stateTexEps;
     }
 
     selectedPointsIndexBuffer({
@@ -1637,7 +1667,10 @@ const createScatterplot = (
   const setPointOrder = (newPointOrder) => {
     if (newPointOrder === null || newPointOrder === undefined) {
       pointOrder = null;
-    } else if (Array.isArray(newPointOrder) || ArrayBuffer.isView(newPointOrder)) {
+    } else if (
+      Array.isArray(newPointOrder) ||
+      ArrayBuffer.isView(newPointOrder)
+    ) {
       pointOrder = newPointOrder;
     } else {
       return;
@@ -2011,7 +2044,8 @@ const createScatterplot = (
       return;
     }
 
-    const [x, y] = points[hoveredPoint].slice(0, 2);
+    const x = pointX(hoveredPoint);
+    const y = pointY(hoveredPoint);
 
     // Homogeneous coordinates of the point
     const v = [x, y, 0, 1];
@@ -2055,11 +2089,14 @@ const createScatterplot = (
   const createPointIndex = (numNewPoints) => {
     const index = new Float32Array(numNewPoints * 2);
 
+    // Inline `indexToStateTexCoord` to avoid a 2-element array allocation per point (5M allocs +
+    // GC at full-tube sizes). Byte-identical: the same modulo/floor arithmetic on the same res/eps.
+    const res = stateTexRes;
+    const eps = stateTexEps;
     let j = 0;
     for (let i = 0; i < numNewPoints; ++i) {
-      const texCoord = indexToStateTexCoord(i);
-      index[j] = texCoord[0]; // x
-      index[j + 1] = texCoord[1]; // y
+      index[j] = (i % res) / res + eps; // x
+      index[j + 1] = Math.floor(i / res) / res + eps; // y
       j += 2;
     }
 
@@ -2112,49 +2149,22 @@ const createScatterplot = (
     pointOrderIndex !== null ? pointOrderIndex : createPointIndex(count);
 
   const createStateTexture = (newPoints, dataTypes = {}) => {
-    const numNewPoints = newPoints.length;
-    stateTexRes = Math.max(2, Math.ceil(Math.sqrt(numNewPoints)));
-    stateTexEps = 0.5 / stateTexRes;
-    const data = new Float32Array(stateTexRes ** 2 * 4);
+    const tPack0 = performance.now();
+    const packed = createStateTextureData(newPoints, dataTypes);
+    const tPack1 = performance.now();
+    stateTexRes = packed.stateTexRes;
+    stateTexEps = packed.stateTexEps;
+    valueZDataType = packed.valueZDataType;
+    valueWDataType = packed.valueWDataType;
 
-    let zIsInts = true;
-    let wIsInts = true;
-
-    let k = 0;
-    let z = 0;
-    let w = 0;
-    for (let i = 0; i < numNewPoints; ++i) {
-      k = i * 4;
-
-      data[k] = newPoints[i][0]; // x
-      data[k + 1] = newPoints[i][1]; // y
-
-      z = newPoints[i][2] || 0;
-      w = newPoints[i][3] || 0;
-
-      data[k + 2] = z; // z: value 1
-      data[k + 3] = w; // w: value 2
-      zIsInts &&= Number.isInteger(z);
-      wIsInts &&= Number.isInteger(w);
-    }
-
-    if (dataTypes.z && VALUE_ZW_DATA_TYPES.includes(dataTypes.z)) {
-      valueZDataType = dataTypes.z;
-    } else {
-      valueZDataType = zIsInts ? CATEGORICAL : CONTINUOUS;
-    }
-
-    if (dataTypes.w && VALUE_ZW_DATA_TYPES.includes(dataTypes.w)) {
-      valueWDataType = dataTypes.w;
-    } else {
-      valueWDataType = wIsInts ? CATEGORICAL : CONTINUOUS;
-    }
-
-    return renderer.regl.texture({
-      data,
+    const tex = renderer.regl.texture({
+      data: packed.data,
       shape: [stateTexRes, stateTexRes, 4],
       type: 'float',
     });
+    lastDrawTiming.stateTexPack = tPack1 - tPack0;
+    lastDrawTiming.stateTexUpload = performance.now() - tPack1;
+    return tex;
   };
 
   const cachePoints = (newPoints, dataTypes = {}) => {
@@ -2223,20 +2233,30 @@ const createScatterplot = (
       });
 
       if (!preventFilterReset) {
+        const tIdx0 = performance.now();
         computePointOrderIndex();
         normalPointsIndexBuffer({
           usage: 'static',
           type: 'float',
           data: getEffectivePointIndex(numPoints),
         });
+        lastDrawTiming.pointIndex = performance.now() - tIdx0;
+      } else {
+        lastDrawTiming.pointIndex = 0;
       }
 
+      const tKd0 = performance.now();
       createKdbush(options.spatialIndex || newPoints, {
         useWorker: spatialIndexUseWorker,
       })
         .then((newSearchIndex) => {
+          lastDrawTiming.kdbush = performance.now() - tKd0;
           spatialIndex = newSearchIndex;
           points = newPoints;
+          pointsColumnar =
+            newPoints && typeof newPoints.getX === 'function'
+              ? newPoints
+              : null;
 
           isPointsDrawn = true;
         })
@@ -2486,7 +2506,7 @@ const createScatterplot = (
       };
 
       // Update point connections
-      if (showPointConnections || hasPointConnections(points[0])) {
+      if (showPointConnections || pointHasConnections()) {
         setPointConnections(getPoints()).then(() => {
           if (!preventEvent) {
             pubSub.publish('pointConnectionsDraw');
@@ -2574,7 +2594,7 @@ const createScatterplot = (
       };
 
       // Update point connections
-      if (showPointConnections || hasPointConnections(points[0])) {
+      if (showPointConnections || pointHasConnections()) {
         setPointConnections(getPoints()).then(() => {
           if (!preventEvent) {
             pubSub.publish('pointConnectionsDraw');
@@ -2686,8 +2706,19 @@ const createScatterplot = (
       return Promise.reject(new Error(ERROR_IS_DRAWING));
     }
     isDrawing = true;
-    return toArrayOrientedPoints(newPoints).then((newPointsArray) =>
-      new Promise((resolve) => {
+    // Fast path: columnar input with no point-connection data feeds the typed arrays straight into
+    // the state texture + spatial index, skipping the ~72 B/point array-of-arrays that
+    // `toArrayOrientedPoints` allocates on the main thread. Any other shape falls back to it verbatim.
+    const tMat0 = performance.now();
+    lastDrawTiming = {};
+    const columnarPoints = toColumnarPoints(newPoints);
+    const pointsPromise = columnarPoints
+      ? Promise.resolve(columnarPoints)
+      : toArrayOrientedPoints(newPoints);
+    return pointsPromise.then((newPointsArray) => {
+      lastDrawTiming.materialize = performance.now() - tMat0;
+      lastDrawTiming.columnar = Boolean(columnarPoints);
+      return new Promise((resolve) => {
         if (isDestroyed) {
           // In the special case where the instance was destroyed after
           // scatterplot.draw() was called but before toArrayOrientedPoints()
@@ -2708,6 +2739,7 @@ const createScatterplot = (
         }
 
         const drawPointConnections =
+          !columnarPoints &&
           newPointsArray &&
           hasPointConnections(newPointsArray[0]) &&
           (showPointConnections || options.showPointConnectionsOnce);
@@ -2821,9 +2853,10 @@ const createScatterplot = (
           }
         });
       }).finally(() => {
+        lastDrawTiming.drawTotal = performance.now() - tMat0;
         isDrawing = false;
-      }),
-    );
+      });
+    });
   };
 
   /**
@@ -2975,7 +3008,8 @@ const createScatterplot = (
     let yMax = Number.NEGATIVE_INFINITY;
 
     for (const pointIdx of pointIdxs) {
-      const [x, y] = points[pointIdx];
+      const x = pointX(pointIdx);
+      const y = pointY(pointIdx);
       xMin = Math.min(xMin, x);
       xMax = Math.max(xMax, x);
       yMin = Math.min(yMin, y);
@@ -3110,14 +3144,20 @@ const createScatterplot = (
       throw new Error(ERROR_POINTS_NOT_DRAWN);
     }
 
-    const point = points[pointIdx];
-
-    if (!point) {
+    if (pointsColumnar) {
+      if (
+        !(pointIdx >= 0) ||
+        pointIdx >= numPoints ||
+        !Number.isInteger(pointIdx)
+      ) {
+        return undefined;
+      }
+    } else if (!points[pointIdx]) {
       return undefined;
     }
 
     // Homogeneous coordinates of the point
-    const v = [point[0], point[1], 0, 1];
+    const v = [pointX(pointIdx), pointY(pointIdx), 0, 1];
 
     // Convert to clip space
     mat4.multiply(
@@ -3438,7 +3478,7 @@ const createScatterplot = (
   const setShowPointConnections = (newShowPointConnections) => {
     showPointConnections = !!newShowPointConnections;
     if (showPointConnections) {
-      if (isPointsDrawn && hasPointConnections(points[0])) {
+      if (isPointsDrawn && pointHasConnections()) {
         setPointConnections(getPoints()).then(() => {
           pubSub.publish('pointConnectionsDraw');
           draw = true;
@@ -3760,6 +3800,10 @@ const createScatterplot = (
       return points;
     }
 
+    if (property === 'drawTiming') {
+      return { ...lastDrawTiming };
+    }
+
     if (property === 'hoveredPoint') {
       return hoveredPoint;
     }
@@ -3771,7 +3815,7 @@ const createScatterplot = (
     if (property === 'filteredPoints') {
       return isPointsFiltered
         ? Array.from(filteredPointsSet)
-        : Array.from({ length: points.length }, (_, i) => i);
+        : Array.from({ length: numPoints }, (_, i) => i);
     }
 
     if (property === 'pointsInView') {
