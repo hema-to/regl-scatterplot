@@ -66,6 +66,10 @@ export const DEFAULT_LASSO_MIN_DELAY = 10;
 export const DEFAULT_LASSO_MIN_DIST = 3;
 export const DEFAULT_LASSO_CLEAR_EVENT = LASSO_CLEAR_ON_END;
 export const DEFAULT_LASSO_ON_LONG_PRESS = false;
+// When true, `lassoEnd` skips its native findPointsInLasso + select so the host app owns
+// lasso selection — avoids paying regl's main-thread point-in-polygon winding when the app
+// computes the selection itself.
+export const DEFAULT_EXTERNAL_LASSO_SELECTION = false;
 export const DEFAULT_LASSO_LONG_PRESS_TIME = 750;
 export const DEFAULT_LASSO_LONG_PRESS_AFTER_EFFECT_TIME = 500;
 export const DEFAULT_LASSO_LONG_PRESS_EFFECT_DELAY = 100;

@@ -137,6 +137,12 @@ interface BaseOptions {
   backgroundColor: Color;
   deselectOnDblClick: boolean;
   deselectOnEscape: boolean;
+  /**
+   * When true, `lassoEnd` skips its native findPointsInLasso + select so the host app owns
+   * lasso selection, resolving it from the published `lassoEnd` coordinates. Avoids regl's
+   * main-thread point-in-polygon winding.
+   */
+  externalLassoSelection: boolean;
   actionKeyMap: KeyMap;
   keyMap: KeyMap;
   mouseMode: MouseMode;
