@@ -374,13 +374,60 @@ const createScatterplot = (
   let mouseDownTimeout = -1;
   /** @type{number[]} */
   let selectedPoints = [];
-  /** @type{Set<number>} */
-  const selectedPointsSet = new Set();
+  // Membership of `selectedPoints`, keyed by point index, as a typed mask instead of a boxed
+  // `Set<number>`. Building a `Set` of a multi-million-point selection is expensive (boxed `.add`
+  // hashing); the mask makes `.add` a typed write, `.has` an O(1) index read, and `clear` an
+  // O(selection) reset of only the members handed to it (never O(numPoints)). Grown to `numPoints`.
+  /** @type{Uint8Array} */
+  let selectedPointsMask = new Uint8Array(0);
+  const ensureSelectedMask = (size) => {
+    if (selectedPointsMask.length < size) {
+      selectedPointsMask = new Uint8Array(size);
+    }
+  };
+  const isSelectedPoint = (pointIdx) =>
+    pointIdx >= 0 &&
+    pointIdx < selectedPointsMask.length &&
+    selectedPointsMask[pointIdx] === 1;
+  const clearSelectedMask = (members) => {
+    for (let i = 0; i < members.length; i++) {
+      const pointIdx = members[i];
+      if (pointIdx >= 0 && pointIdx < selectedPointsMask.length) {
+        selectedPointsMask[pointIdx] = 0;
+      }
+    }
+  };
   /** @type{Set<number>} */
   const selectedPointsConnectionSet = new Set();
   let isPointsFiltered = false;
-  /** @type{Set<number>} */
-  const filteredPointsSet = new Set();
+  // Filtered-in (visible) membership, keyed by point index, as a typed mask instead of a boxed
+  // `Set<number>` — same rationale as `selectedPointsMask`. A filter can mark up to every point, so a
+  // `Set` is expensive to build and to `.has`-probe across the draw path (`isPointsFilteredOut`/
+  // `getPoints`/`raycast`). `filteredPointsList` is the persisted member list — the buffer/order
+  // source, the O(members) mask clear, and what `get('filteredPoints')` returns. Both grown to
+  // `numPoints`.
+  /** @type{Uint8Array} */
+  let filteredPointsMask = new Uint8Array(0);
+  /** @type{number[]} */
+  let filteredPointsList = [];
+  const ensureFilteredMask = (size) => {
+    if (filteredPointsMask.length < size) {
+      filteredPointsMask = new Uint8Array(size);
+    }
+  };
+  const isFilteredIn = (pointIdx) =>
+    pointIdx >= 0 &&
+    pointIdx < filteredPointsMask.length &&
+    filteredPointsMask[pointIdx] === 1;
+  const clearFilteredMask = () => {
+    for (let i = 0; i < filteredPointsList.length; i++) {
+      const pointIdx = filteredPointsList[i];
+      if (pointIdx >= 0 && pointIdx < filteredPointsMask.length) {
+        filteredPointsMask[pointIdx] = 0;
+      }
+    }
+    filteredPointsList = [];
+  };
   let points = [];
   // Columnar fast-path descriptor (typed-array accessors) when the drawn input is columnar and has
   // no point-connection data; `null` on the array-oriented fallback path. Non-null ⟹ `points` holds
@@ -642,7 +689,7 @@ const createScatterplot = (
 
   const getPoints = () => {
     if (isPointsFiltered) {
-      return points.filter((_, i) => filteredPointsSet.has(i));
+      return points.filter((_, i) => isFilteredIn(i));
     }
     return points;
   };
@@ -650,7 +697,7 @@ const createScatterplot = (
   const getPointsInBBox = (x0, y0, x1, y1) => {
     const pointsInBBox = spatialIndex.range(x0, y0, x1, y1);
     if (isPointsFiltered) {
-      return pointsInBBox.filter((i) => filteredPointsSet.has(i));
+      return pointsInBBox.filter((i) => isFilteredIn(i));
     }
     return pointsInBBox;
   };
@@ -786,7 +833,7 @@ const createScatterplot = (
   ];
 
   const isPointsFilteredOut = (pointIdx) =>
-    isPointsFiltered && !filteredPointsSet.has(pointIdx);
+    isPointsFiltered && !isFilteredIn(pointIdx);
 
   const deselect = ({ preventEvent = false } = {}) => {
     if (lassoClearEvent === LASSO_CLEAR_ON_DESELECT) {
@@ -798,8 +845,8 @@ const createScatterplot = (
       }
       selectedPointsConnectionSet.clear();
       setPointConnectionColorState(selectedPoints, 0);
+      clearSelectedMask(selectedPoints);
       selectedPoints = [];
-      selectedPointsSet.clear();
       draw = true;
     }
   };
@@ -855,7 +902,15 @@ const createScatterplot = (
     const newSelectedPoints = Array.isArray(pointIdxs)
       ? pointIdxs
       : [pointIdxs];
-    const currSelectedPoints = [...selectedPoints];
+    // The outgoing selection: kept as a ref (to clear its mask entries below) + a count (the branches'
+    // O(1) "nothing changed" skips). The old code spread `[...selectedPoints]` here AND, after the
+    // branch, ran `hasSameElements(currSelectedPoints, selectedPoints)` to detect an unchanged
+    // re-select — but `hasSameElements` builds TWO `Set`s of the full selection just to decide "skip",
+    // which is as expensive as the rebuild it guards. The rebuild is now cheap (typed mask), so the
+    // guard is dropped: a redundant re-select just rebuilds instead of paying the boxed-Set
+    // comparison. The length skips below stay (genuinely O(1)).
+    const prevSelected = selectedPoints;
+    const prevSelectedCount = selectedPoints.length;
 
     if (intersect) {
       const newSelectedPointsSet = new Set(newSelectedPoints);
@@ -865,13 +920,13 @@ const createScatterplot = (
           ? selectedPoints.filter((point) => newSelectedPointsSet.has(point))
           : newSelectedPoints;
 
-      if (currSelectedPoints.length === selectedPoints.length) {
+      if (prevSelectedCount === selectedPoints.length) {
         draw = true;
         return;
       }
     } else if (merge) {
       selectedPoints = unionIntegers(selectedPoints, newSelectedPoints);
-      if (currSelectedPoints.length === selectedPoints.length) {
+      if (prevSelectedCount === selectedPoints.length) {
         draw = true;
         return;
       }
@@ -880,7 +935,7 @@ const createScatterplot = (
       selectedPoints = selectedPoints.filter(
         (point) => !newSelectedPointsSet.has(point),
       );
-      if (currSelectedPoints.length === selectedPoints.length) {
+      if (prevSelectedCount === selectedPoints.length) {
         draw = true;
         return;
       }
@@ -889,24 +944,20 @@ const createScatterplot = (
       if (selectedPoints?.length > 0) {
         setPointConnectionColorState(selectedPoints, 0);
       }
-      if (currSelectedPoints.length > 0 && newSelectedPoints.length === 0) {
+      if (prevSelectedCount > 0 && newSelectedPoints.length === 0) {
         deselect({ preventEvent });
         return;
       }
       selectedPoints = newSelectedPoints;
     }
 
-    if (hasSameElements(currSelectedPoints, selectedPoints)) {
-      draw = true;
-      return;
-    }
-
     // Drop invalid/filtered points without splice-in-loop, then fill a preallocated Float32Array with
     // the state-tex coords inlined. The old path pushed into a plain Array via `push.apply` (one 2-elem
-    // allocation per point) and handed that Array to regl, which re-converts it element-by-element — both
-    // super-linear + GC-heavy at 100k+ selected points (a large lasso synced across many live plots froze
-    // the tab; ~86x faster at 500k). A typed array uploads directly with no per-element conversion.
-    selectedPointsSet.clear();
+    // allocation per point) and handed that Array to regl, which re-converts it element-by-element —
+    // both super-linear + GC-heavy at large selection sizes. A typed array uploads directly with no
+    // per-element conversion.
+    clearSelectedMask(prevSelected);
+    ensureSelectedMask(numPoints);
     selectedPointsConnectionSet.clear();
 
     const validSelectedPoints = [];
@@ -920,7 +971,7 @@ const createScatterplot = (
         continue;
       }
       validSelectedPoints.push(pointIdx);
-      selectedPointsSet.add(pointIdx);
+      selectedPointsMask[pointIdx] = 1;
     }
     selectedPoints = validSelectedPoints;
 
@@ -1000,7 +1051,7 @@ const createScatterplot = (
   ) => {
     let needsRedraw = false;
 
-    const isFilteredOut = isPointsFiltered && !filteredPointsSet.has(point);
+    const isFilteredOut = isPointsFiltered && !isFilteredIn(point);
 
     if (!isFilteredOut && point >= 0 && point < numPoints) {
       needsRedraw = true;
@@ -1009,13 +1060,13 @@ const createScatterplot = (
       if (
         +oldHoveredPoint >= 0 &&
         newHoveredPoint &&
-        !selectedPointsSet.has(oldHoveredPoint)
+        !isSelectedPoint(oldHoveredPoint)
       ) {
         setPointConnectionColorState([oldHoveredPoint], 0);
       }
       hoveredPoint = point;
       hoveredPointIndexBuffer.subdata(indexToStateTexCoord(point));
-      if (!selectedPointsSet.has(point)) {
+      if (!isSelectedPoint(point)) {
         setPointConnectionColorState([point], 2);
       }
       if (newHoveredPoint && !preventEvent) {
@@ -1024,7 +1075,7 @@ const createScatterplot = (
     } else {
       needsRedraw = +hoveredPoint >= 0;
       if (needsRedraw) {
-        if (!selectedPointsSet.has(hoveredPoint)) {
+        if (!isSelectedPoint(hoveredPoint)) {
           setPointConnectionColorState([hoveredPoint], 0);
         }
         if (!preventEvent) {
@@ -1292,7 +1343,7 @@ const createScatterplot = (
       return;
     }
 
-    if (+hoveredPoint >= 0 && !selectedPointsSet.has(hoveredPoint)) {
+    if (+hoveredPoint >= 0 && !isSelectedPoint(hoveredPoint)) {
       setPointConnectionColorState([hoveredPoint], 0);
     }
     mouseUpHandler();
@@ -1690,7 +1741,7 @@ const createScatterplot = (
         const filteredPointsBuffer = [];
         if (pointOrderIndices !== null) {
           for (let i = 0; i < pointOrderIndices.length; i++) {
-            if (filteredPointsSet.has(pointOrderIndices[i])) {
+            if (isFilteredIn(pointOrderIndices[i])) {
               filteredPointsBuffer.push.apply(
                 filteredPointsBuffer,
                 indexToStateTexCoord(pointOrderIndices[i]),
@@ -1698,7 +1749,7 @@ const createScatterplot = (
             }
           }
         } else {
-          const sortedFiltered = insertionSort([...filteredPointsSet]);
+          const sortedFiltered = insertionSort(filteredPointsList.slice());
           for (const idx of sortedFiltered) {
             filteredPointsBuffer.push.apply(
               filteredPointsBuffer,
@@ -1777,7 +1828,7 @@ const createScatterplot = (
     getPointScale = getConstantPointScale;
   }
   const getNormalNumPoints = () =>
-    isPointsFiltered ? filteredPointsSet.size : numPoints;
+    isPointsFiltered ? filteredPointsList.length : numPoints;
   const getSelectedNumPoints = () => selectedPoints.length;
   const getPointOpacityMaxBase = () =>
     getSelectedNumPoints() > 0 ? opacityInactiveMax : 1;
@@ -2096,8 +2147,8 @@ const createScatterplot = (
   const createPointIndex = (numNewPoints) => {
     const index = new Float32Array(numNewPoints * 2);
 
-    // Inline `indexToStateTexCoord` to avoid a 2-element array allocation per point (5M allocs +
-    // GC at full-tube sizes). Byte-identical: the same modulo/floor arithmetic on the same res/eps.
+    // Inline `indexToStateTexCoord` to avoid a 2-element array allocation per point (millions of
+    // allocs + GC at large sizes). Byte-identical: the same modulo/floor arithmetic on the same res/eps.
     const res = stateTexRes;
     const eps = stateTexEps;
     let j = 0;
@@ -2494,7 +2545,7 @@ const createScatterplot = (
    */
   const unfilter = ({ preventEvent = false } = {}) => {
     isPointsFiltered = false;
-    filteredPointsSet.clear();
+    clearFilteredMask();
     normalPointsIndexBuffer.subdata(getEffectivePointIndex(numPoints));
 
     return new Promise((resolve) => {
@@ -2533,11 +2584,11 @@ const createScatterplot = (
    */
   const filter = (pointIdxs, { preventEvent = false } = {}) => {
     isPointsFiltered = true;
-    filteredPointsSet.clear();
+    clearFilteredMask();
+    ensureFilteredMask(numPoints);
 
     const pointIdxsArray = Array.isArray(pointIdxs) ? pointIdxs : [pointIdxs];
     const filteredPoints = [];
-    const filteredPointsBuffer = [];
     const filteredSelectedPoints = [];
 
     for (const pointIdx of pointIdxsArray) {
@@ -2547,19 +2598,20 @@ const createScatterplot = (
       }
 
       filteredPoints.push(pointIdx);
-      filteredPointsSet.add(pointIdx);
+      filteredPointsMask[pointIdx] = 1;
 
-      if (selectedPointsSet.has(pointIdx)) {
+      if (isSelectedPoint(pointIdx)) {
         filteredSelectedPoints.push(pointIdx);
       }
     }
+    filteredPointsList = filteredPoints;
 
     let orderedFilteredPoints;
     if (pointOrderIndices !== null) {
       // Maintain the custom point order within the filtered set
       orderedFilteredPoints = [];
       for (let i = 0; i < pointOrderIndices.length; i++) {
-        if (filteredPointsSet.has(pointOrderIndices[i])) {
+        if (isFilteredIn(pointOrderIndices[i])) {
           orderedFilteredPoints.push(pointOrderIndices[i]);
         }
       }
@@ -2567,11 +2619,19 @@ const createScatterplot = (
       orderedFilteredPoints = insertionSort([...filteredPoints]);
     }
 
-    for (const pointIdx of orderedFilteredPoints) {
-      filteredPointsBuffer.push.apply(
-        filteredPointsBuffer,
-        indexToStateTexCoord(pointIdx),
-      );
+    // Fill a preallocated Float32Array with the state-tex coords inlined instead of
+    // `push.apply(buffer, [x, y])` per point (one 2-elem array allocation + a variadic spread each) —
+    // the same super-linear, GC-heavy anti-pattern the point-selection rewrite removed. regl's
+    // `subdata` uploads the typed array directly.
+    const filteredPointsBuffer = new Float32Array(
+      orderedFilteredPoints.length * 2,
+    );
+    for (let i = 0; i < orderedFilteredPoints.length; i++) {
+      const pointIdx = orderedFilteredPoints[i];
+      filteredPointsBuffer[i * 2] =
+        (pointIdx % stateTexRes) / stateTexRes + stateTexEps;
+      filteredPointsBuffer[i * 2 + 1] =
+        Math.floor(pointIdx / stateTexRes) / stateTexRes + stateTexEps;
     }
 
     // Update the normal points index buffers
@@ -2581,7 +2641,7 @@ const createScatterplot = (
     select(filteredSelectedPoints, { preventEvent });
 
     // Unset any potentially hovered point
-    if (!filteredPointsSet.has(hoveredPoint)) {
+    if (!isFilteredIn(hoveredPoint)) {
       hover(-1, { preventEvent });
     }
 
@@ -2742,7 +2802,7 @@ const createScatterplot = (
           newPointsArray?.length !== numPoints
         ) {
           isPointsFiltered = false;
-          filteredPointsSet.clear();
+          clearFilteredMask();
         }
 
         const drawPointConnections =
@@ -3829,7 +3889,7 @@ const createScatterplot = (
 
     if (property === 'filteredPoints') {
       return isPointsFiltered
-        ? Array.from(filteredPointsSet)
+        ? filteredPointsList.slice()
         : Array.from({ length: numPoints }, (_, i) => i);
     }
 
