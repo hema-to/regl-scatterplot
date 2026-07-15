@@ -408,8 +408,9 @@ const createScatterplot = (
   // `numPoints`.
   /** @type{Uint8Array} */
   let filteredPointsMask = new Uint8Array(0);
-  /** @type{number[]} */
-  let filteredPointsList = [];
+  /** @type{Uint32Array} — typed (4 B/idx) instead of a boxed number[] (~8 B/idx + overhead); a filter
+   * can hold up to every point, so on a multi-million-point plot this halves the retained member list. */
+  let filteredPointsList = new Uint32Array(0);
   const ensureFilteredMask = (size) => {
     if (filteredPointsMask.length < size) {
       filteredPointsMask = new Uint8Array(size);
@@ -426,7 +427,7 @@ const createScatterplot = (
         filteredPointsMask[pointIdx] = 0;
       }
     }
-    filteredPointsList = [];
+    filteredPointsList = new Uint32Array(0);
   };
   let points = [];
   // Columnar fast-path descriptor (typed-array accessors) when the drawn input is columnar and has
@@ -1750,10 +1751,10 @@ const createScatterplot = (
           }
         } else {
           const sortedFiltered = insertionSort(filteredPointsList.slice());
-          for (const idx of sortedFiltered) {
+          for (let i = 0; i < sortedFiltered.length; i++) {
             filteredPointsBuffer.push.apply(
               filteredPointsBuffer,
-              indexToStateTexCoord(idx),
+              indexToStateTexCoord(sortedFiltered[i]),
             );
           }
         }
@@ -2587,23 +2588,39 @@ const createScatterplot = (
     clearFilteredMask();
     ensureFilteredMask(numPoints);
 
-    const pointIdxsArray = Array.isArray(pointIdxs) ? pointIdxs : [pointIdxs];
-    const filteredPoints = [];
+    // Accept a plain Array OR a typed array (e.g. Uint32Array) of indices, and iterate BY INDEX. A
+    // `for…of` here boxes an iterator-result object per element — millions of `{value,done}` across a
+    // large plot (and unconditionally so under a dev bundle that down-levels `for…of` to the iterator
+    // protocol) — the same super-linear GC churn the point-selection rewrite already removed.
+    const pointIdxsArray =
+      Array.isArray(pointIdxs) || ArrayBuffer.isView(pointIdxs)
+        ? pointIdxs
+        : [pointIdxs];
+    const inputLength = pointIdxsArray.length;
+    // Build the member list into a typed buffer (upper-bounded by the input) with a write cursor, then
+    // right-size it — the persisted `filteredPointsList` is retained for the plot's lifetime.
+    const filteredPointsMembers = new Uint32Array(inputLength);
+    let filteredCount = 0;
     const filteredSelectedPoints = [];
 
-    for (const pointIdx of pointIdxsArray) {
+    for (let i = 0; i < inputLength; i++) {
+      const pointIdx = pointIdxsArray[i];
       if (!Number.isFinite(pointIdx) || pointIdx < 0 || pointIdx >= numPoints) {
         // Skip invalid filtered points
         continue;
       }
 
-      filteredPoints.push(pointIdx);
+      filteredPointsMembers[filteredCount++] = pointIdx;
       filteredPointsMask[pointIdx] = 1;
 
       if (isSelectedPoint(pointIdx)) {
         filteredSelectedPoints.push(pointIdx);
       }
     }
+    const filteredPoints =
+      filteredCount === inputLength
+        ? filteredPointsMembers
+        : filteredPointsMembers.slice(0, filteredCount);
     filteredPointsList = filteredPoints;
 
     let orderedFilteredPoints;
@@ -2616,7 +2633,7 @@ const createScatterplot = (
         }
       }
     } else {
-      orderedFilteredPoints = insertionSort([...filteredPoints]);
+      orderedFilteredPoints = insertionSort(filteredPoints.slice());
     }
 
     // Fill a preallocated Float32Array with the state-tex coords inlined instead of

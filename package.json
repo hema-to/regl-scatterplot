@@ -1,6 +1,6 @@
 {
   "name": "@hema-to/regl-scatterplot",
-  "version": "1.16.0-hemato.2",
+  "version": "1.16.0-hemato.3",
   "description": "A WebGL-Powered Scalable Interactive Scatter Plot Library",
   "author": "Fritz Lekschas",
   "keywords": [
